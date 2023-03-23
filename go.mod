@@ -1,5 +1,5 @@
 
-module myfood-app
+module edge-api
 
 go 1.20
 
