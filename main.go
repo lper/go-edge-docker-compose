@@ -32,7 +32,7 @@ func main() {
 		c.JSON(200, gin.H{"message": "pong"})
 	})
 
-	handler.OPTIONS("/edgesvc/turing/conversation/create", proxy)
+	handler.GET("/edgesvc/turing/conversation/create", proxy)
 
 	endless.ListenAndServe(os.Getenv("HOST")+":"+PORT, handler)
 }
