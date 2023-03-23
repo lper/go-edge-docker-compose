@@ -1,92 +1,77 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"github.com/gorilla/mux"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
-	"net/http"
-	"time"
+	"io"
+	"os"
+
+	http "github.com/bogdanfinn/fhttp"
+	tls_client "github.com/bogdanfinn/tls-client"
+
+	"github.com/fvbock/endless"
+	"github.com/gin-gonic/gin"
 )
 
-var client *mongo.Client
-
-type Food struct {
-	ID    primitive.ObjectID `json:"_id,omitempty" bson:"_id,omitempty"`
-	Name  string             `json:"name,omitempty" bson:"name,omitempty"`
-	Tribe string             `json:"tribe,omitempty" bson:"tribe,omitempty"`
-}
-
-func Welcome(response http.ResponseWriter, request *http.Request) {
-	fmt.Fprint(response, "Welcome to MyFood App!")
-}
-
-func AddFood(response http.ResponseWriter, request *http.Request) {
-	response.Header().Set("content-type", "application/json")
-	var food Food
-	_ = json.NewDecoder(request.Body).Decode(&food)
-	collection := client.Database("myfood").Collection("foods")
-	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
-	result, _ := collection.InsertOne(ctx, food)
-	json.NewEncoder(response).Encode(result)
-}
-
-func GetFood(response http.ResponseWriter, request *http.Request) {
-	response.Header().Set("content-type", "application/json")
-	params := mux.Vars(request)
-	id, _ := primitive.ObjectIDFromHex(params["id"])
-	var food Food
-	collection := client.Database("myfood").Collection("foods")
-	ctx, _ := context.WithTimeout(context.Background(), 30*time.Second)
-	err := collection.FindOne(ctx, Food{ID: id}).Decode(&food)
-	if err != nil {
-		response.WriteHeader(http.StatusInternalServerError)
-		response.Write([]byte(`{ "message": "` + err.Error() + `" }`))
-		return
+var (
+	jar     = tls_client.NewCookieJar()
+	options = []tls_client.HttpClientOption{
+		tls_client.WithTimeoutSeconds(360),
+		tls_client.WithClientProfile(tls_client.Chrome_110),
+		tls_client.WithNotFollowRedirects(),
+		tls_client.WithCookieJar(jar), // create cookieJar instance and pass it as argument
 	}
-	json.NewEncoder(response).Encode(food)
-}
-
-func GetFoods(response http.ResponseWriter, request *http.Request) {
-	response.Header().Set("content-type", "application/json")
-	var foods []Food
-	collection := client.Database("myfood").Collection("foods")
-	ctx, _ := context.WithTimeout(context.Background(), 30*time.Second)
-	cursor, err := collection.Find(ctx, bson.M{})
-	if err != nil {
-		response.WriteHeader(http.StatusInternalServerError)
-		response.Write([]byte(`{ "message": "` + err.Error() + `" }`))
-		return
-	}
-	defer cursor.Close(ctx)
-	for cursor.Next(ctx) {
-		var food Food
-		cursor.Decode(&food)
-		foods = append(foods, food)
-	}
-	if err := cursor.Err(); err != nil {
-		response.WriteHeader(http.StatusInternalServerError)
-		response.Write([]byte(`{ "message": "` + err.Error() + `" }`))
-		return
-	}
-
-	json.NewEncoder(response).Encode(foods)
-
-}
+	client, _ = tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+)
 
 func main() {
-	fmt.Println("Starting the application on port 8080")
-	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
-	clientOptions := options.Client().ApplyURI("mongodb://mongodb:27017")
-	client, _ = mongo.Connect(ctx, clientOptions)
-	router := mux.NewRouter()
-	router.HandleFunc("/food", AddFood).Methods("POST")
-	router.HandleFunc("/food", GetFoods).Methods("GET")
-	router.HandleFunc("/food/{id}", GetFood).Methods("GET")
-	router.HandleFunc("/", Welcome).Methods("GET")
-	http.ListenAndServe(":8080", router)
+	PORT := os.Getenv("PORT")
+	if PORT == "" {
+		PORT = "8080"
+	}
+	handler := gin.Default()
+	handler.GET("/ping", func(c *gin.Context) {
+		c.JSON(200, gin.H{"message": "pong"})
+	})
+
+	handler.GET("/edgesvc/turing/conversation/create", proxy)
+
+	endless.ListenAndServe(os.Getenv("HOST")+":"+PORT, handler)
+}
+
+func proxy(c *gin.Context) {
+
+	var url string
+	var err error
+	var request_method string
+	var request *http.Request
+	var response *http.Response
+
+	url = "https://edgeservices.bing.com/edgesvc/turing/conversation/create"
+	request_method = c.Request.Method
+
+	request, err = http.NewRequest(request_method, url, c.Request.Body)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Copy headers
+	for key, value := range c.Request.Header {
+		request.Header.Set(key, value[0])
+	}
+
+	response, err = client.Do(request)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	defer response.Body.Close()
+	c.Header("Content-Type", response.Header.Get("Content-Type"))
+	// Get status code
+	c.Status(response.StatusCode)
+	c.Stream(func(w io.Writer) bool {
+		// Write data to client
+		io.Copy(w, response.Body)
+		return false
+	})
+
 }
