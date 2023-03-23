@@ -67,10 +67,10 @@ func proxy(c *gin.Context) {
 	defer response.Body.Close()
 	c.Header("Content-Type", response.Header.Get("Content-Type"))
 	c.Header("Access-Control-Allow-Origin", "*")
-	//c.Header("Access-Control-Allow-Headers", "Content-Type,AccessToken,X-CSRF-Token, Authorization, Token")
-	//c.Header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
-	//c.Header("Access-Control-Expose-Headers", "Content-Length, Access-Control-Allow-Origin, Access-Control-Allow-Headers, Content-Type")
-	//c.Header("Access-Control-Allow-Credentials", "true")
+	c.Header("Access-Control-Allow-Headers", "*")
+	c.Header("Access-Control-Allow-Methods", "*")
+	c.Header("Access-Control-Expose-Headers", "*")
+	c.Header("Access-Control-Allow-Credentials", "true")
 
 	// Get status code
 	c.Status(response.StatusCode)
